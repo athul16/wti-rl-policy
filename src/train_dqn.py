@@ -18,7 +18,7 @@ def soft_update(target, online, tau: float):
 def main():
     sim_path = Path("data/sims/wti_simulated_paths.npz")
     if not sim_path.exists():
-        raise FileNotFoundError("Put your friend's file at data/sims/wti_simulated_paths.npz (must contain 'paths').")
+        raise FileNotFoundError("Put file at data/sims/wti_simulated_paths.npz (must contain 'paths').")
     paths = load_sim_paths(sim_path)
     N, T = paths.shape
     print("Loaded sims:", paths.shape)
@@ -102,7 +102,7 @@ def main():
         else:
             avg_loss = float("nan")
 
-        print(f"\\nEpoch {ep:03d} | ep_return {ep_ret:.4f} | buffer {len(rb)} | loss {avg_loss}")
+        print(f"\nEpoch {ep:03d} | ep_return {ep_ret:.6f} | buffer {len(rb)} | loss {avg_loss}")
 
         if ep % 5 == 0:
             torch.save(

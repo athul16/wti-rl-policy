@@ -160,8 +160,9 @@ Interpretation:
 
 Current defaults in training:
 - `cost = 0.0005`
-- `risk_lambda = 0.001`
-- `episode_len = 252`
+- `risk_lambda = 0.002`
+- `episode_len = 504`
+- `train_steps_per_epoch = 4000`
 - `lookback = 30`
 
 ## DQN Implementation
@@ -201,14 +202,15 @@ The current evaluation setup is limited.
 What it currently does:
 
 - `src/eval_policy.py`
-  - loads `data/sims/wti_real_episodes.npz`
-  - evaluates only `paths[0]`
-  - compares RL policy to always-long and always-flat
-  - saves one equity curve figure
+  - loads `data/sims/wti_real_test.npz`
+  - evaluates one deterministic held-out episode
+  - compares RL policy to always-flat, always-long, and always-short
+  - saves `outputs/eval/heldout_policy_comparison.png`
 
 - `src/metrics_eval.py`
   - loads `data/sims/wti_real_test.npz`
   - evaluates all held-out test episodes
+  - uses deterministic episode starts during evaluation
   - prints:
     - mean total pnl
     - std total pnl
@@ -217,6 +219,12 @@ What it currently does:
     - mean max drawdown
     - win rate across episodes
     - action counts
+  - compares:
+    - RL Policy
+    - Always Flat
+    - Always Long
+    - Always Short
+  - can save machine-readable output to `outputs/eval/metrics_eval.json`
 
 What it does not currently do:
 
@@ -241,9 +249,9 @@ Current issues that should be treated as real code-level facts:
    - implemented environment assumes returns only
 
 3. Evaluation is still incomplete even after the held-out metrics baseline
-   - `metrics_eval.py` now aggregates RL-policy metrics across held-out episodes
-   - `eval_policy.py` still plots only one episode
-   - baseline metrics are not aggregated across the held-out distribution
+   - `metrics_eval.py` now aggregates RL and fixed-baseline metrics across held-out episodes
+   - `eval_policy.py` still plots only one illustrative episode
+   - evaluation is deterministic but still not sliced by regime, trend, or scenario type
 
 4. Generalization testing is still narrow
    - held-out testing exists for real-data episodes

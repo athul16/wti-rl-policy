@@ -1,177 +1,84 @@
-# WTI RL Policy — Project Context
+# WTI RL Policy — Session Handoff Context
 
-## Project Role
+## What Project 2 Currently Does
 This repository is Project 2 in a two-project system.
 
-It trains a **DQN trading agent** on simulated WTI paths.
+Its current implemented pipeline is:
 
-These simulated paths come from:
-../wti-signature-cvae
+1. download real WTI futures prices
+2. convert prices to log returns
+3. slice returns into overlapping fixed-length episodes
+4. train a single-asset DQN trading policy on those episodes
+5. evaluate the policy on deterministic held-out episodes against simple fixed baselines
 
-This repo does NOT generate data.
-It consumes synthetic market scenarios.
+The repo does not yet consume real synthetic paths from `../wti-signature-cvae`.
 
----
+## What Was Fixed This Session
+- corrected position encoding so the state matches env positions `{-1, 0, +1}`
+- made held-out evaluation deterministic by disabling randomized episode starts in evaluation
+- upgraded `metrics_eval.py` to compare:
+  - RL Policy
+  - Always Flat
+  - Always Long
+  - Always Short
+- added compact comparison output and optional JSON export
+- updated `eval_policy.py` to generate held-out comparison plots at:
+  - `outputs/eval/heldout_policy_comparison.png`
+- documented repository workflow and current project state in `AGENTS.md`
 
-# System Architecture
+## Current Best Metrics And What They Mean
+Best credible Project 2 takeaway from this session:
+- under the stronger deterministic held-out evaluation setup, RL can beat trivial always-long and always-short baselines
 
-Real WTI data
-    ↓
-wti-signature-cvae
-    ↓ generates synthetic paths
-wti-rl-policy (THIS REPO)
-    ↓ trains RL trader
-Output:
-robust trading policy
+Important note:
+- the later 504-step experiments did not improve quality
+- the strongest conclusion is that Project 2 now has a credible evaluation baseline, not that the latest checkpoint is the best policy
 
----
+Representative stronger-baseline result before the failed feature expansion:
+- deterministic held-out comparison across 136 episodes
+- RL mean total pnl was positive
+- RL mean Sharpe was positive
+- RL beat always-long and always-short on mean total pnl
 
-# RL Objective
+## Visualizations That Now Exist
+- held-out single-episode policy comparison plot:
+  - `outputs/eval/heldout_policy_comparison.png`
+- machine-readable aggregated evaluation output:
+  - `outputs/eval/metrics_eval.json`
 
-Learn a trading policy that maximizes returns across:
+## What Failed
+Failed experiment:
+- adding raw multi-horizon regime-aware state features in `src/features.py`
+- windows used: `20`, `60`, `120`
+- this increased state size from `38` to `50`
 
-- trending markets
-- mean reverting markets
-- high volatility
-- crash regimes
-- synthetic stress scenarios
+Observed result under the 504-step setup:
+- severe held-out regression
+- mean total pnl became strongly negative
+- Sharpe became strongly negative
+- max drawdown worsened materially
+- win rate fell to zero
 
----
+Likely interpretation:
+- Project 2 is now bottlenecked more by data/regime quality than by more ad hoc manual state expansion
+- richer state alone did not solve the long-horizon instability problem
 
-# Action Space
+## Why The Next Likely Focus Is Project 1
+Project 2 now has:
+- a working real-data training loop
+- deterministic held-out evaluation
+- baseline comparisons
+- plotting
 
-Discrete:
+What it lacks is a better distribution of training scenarios.
 
-0 = short
-1 = flat
-2 = long
+The next likely source of progress is `wti-signature-cvae`:
+- build or inspect the upstream generator
+- create regime-aware synthetic paths
+- define a clean export contract
+- feed those paths back into Project 2
 
-Positions persist across timesteps.
-
----
-
-# Environment Design
-
-State may include:
-- recent returns window
-- current position
-- rolling volatility
-- time index
-- optional signature features (future idea)
-
----
-
-# Reward Function (Baseline)
-
-reward_t =
-position_{t-1} * return_t
-- transaction_cost * |position change|
-
-Important:
-Reward must reflect PnL.
-
----
-
-# Data Input
-
-Expected:
-
-NPZ file:
-paths shape (N, T)
-
-Each path:
-- return series OR
-- price series
-
-This must be explicitly handled.
-
----
-
-# Training Loop
-
-For each path:
-    reset environment
-    step through time
-    choose action
-    observe reward
-    store transition
-    train DQN
-
----
-
-# DQN Components
-
-- Q network
-- target network
-- replay buffer
-- epsilon-greedy exploration
-- TD loss
-- periodic target update
-
----
-
-# Evaluation Metrics
-
-Must include:
-
-- cumulative PnL
-- Sharpe ratio
-- max drawdown
-- volatility
-- win rate
-- average trade return
-- reward curve
-- buy & hold comparison
-- random policy comparison
-
----
-
-# Plots Needed
-
-1. training reward curve
-2. episode PnL
-3. cumulative returns
-4. action distribution
-5. Q value evolution
-6. drawdown chart
-
----
-
-# Why Synthetic Data Matters
-
-Training only on historical data:
-- overfits
-- limited regimes
-
-Training on generated paths:
-- broader distribution
-- more crashes
-- more volatility patterns
-- better generalization
-
----
-
-# Future Extensions
-
-- risk-adjusted reward
-- Sharpe-based reward
-- policy gradient comparison
-- regime-conditioned policy
-- ensemble training
-- signature-based state
-
----
-
-# DO NOT
-
-- assume Gaussian returns
-- ignore transaction costs
-- evaluate only reward
-- train on one path only
-
----
-
-# This Repo Exists To
-
-Learn a **robust trading policy**
-from synthetic WTI market scenarios.
+## Exact Suggested Next-Session Priority
+1. inspect and implement `wti-signature-cvae`
+2. define a clean synthetic-path export contract
+3. reconnect Project 1 output into Project 2 input

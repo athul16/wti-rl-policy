@@ -47,9 +47,9 @@ Current implemented pipeline:
    - saves checkpoints to `outputs/checkpoints/`
 
 4. `src/eval_policy.py` and `src/metrics_eval.py`
-   - load `data/sims/wti_real_episodes.npz` or the latest checkpoint
-   - evaluate only one episode, not the full held-out test set
-   - produce a simple equity plot or single-episode summary metrics
+   - load `data/sims/wti_real_test.npz` and the latest checkpoint
+   - use deterministic held-out evaluation
+   - produce held-out comparison metrics and a single-episode comparison plot
 
 ## Actual Data Flow
 Exact data flow from raw input to environment step:
@@ -120,10 +120,12 @@ For default `lookback=30`, the state is:
    - short-horizon momentum
    - drawdown of cumulative returns
    - slope of cumulative returns over the window
-4. `3` position one-hot features
+4. optional multi-horizon summaries when enabled in the current code path
+5. `3` position one-hot features
 
 Default state size:
-- `30 + 5 + 3 = 38`
+- baseline state: `30 + 5 + 3 = 38`
+- failed multi-horizon experiment state: `30 + 5 + 12 + 3 = 50`
 
 Current status:
 - the position one-hot block is aligned with environment positions in `{-1, 0, +1}`
@@ -197,7 +199,7 @@ Training loop behavior:
 - replay updates begin only after `warmup_steps=10_000`
 
 ## Evaluation Reality
-The current evaluation setup is limited.
+The current evaluation setup is credible enough to compare Project 2 policies, but it is still limited.
 
 What it currently does:
 
@@ -228,11 +230,14 @@ What it currently does:
 
 What it does not currently do:
 
-- compare against always-short
 - compare against random or buy-and-hold benchmarks
-- aggregate baseline metrics across the held-out distribution
 - report trade-level statistics
+- slice performance by regime, trend, or scenario type
 - test generalization on upstream synthetic paths
+
+Current best known takeaway:
+- under the stronger deterministic held-out evaluation setup, the Project 2 RL policy can beat trivial fixed-direction baselines
+- this is the current best evidence that the repo has a credible evaluation baseline
 
 ## Known Bugs And Inconsistencies
 Current issues that should be treated as real code-level facts:
@@ -257,7 +262,17 @@ Current issues that should be treated as real code-level facts:
    - held-out testing exists for real-data episodes
    - there is still no evaluation on upstream synthetic paths
 
-5. Unused or placeholder modules exist
+5. Important failed experiment
+   - adding raw multi-horizon regime-aware state features under the 504-step setup caused a severe held-out regression
+   - observed failure mode:
+     - mean total pnl collapsed below zero
+     - Sharpe turned strongly negative
+     - max drawdown worsened sharply
+     - win rate fell to zero
+   - likely interpretation:
+     - Project 2 now needs better upstream synthetic data and regime structure from Project 1 more than more ad hoc state expansion inside the current DQN
+
+6. Unused or placeholder modules exist
    - `src/io_real.py` is empty
    - `src/train_a2c.py` is empty
    - `src/normalizer.py` is currently unused
@@ -307,6 +322,7 @@ Current reality:
 - its implementation files are currently empty
 - this repo is not yet wired to consume real synthetic outputs from upstream
 - training today uses real historical episodes, not generator-produced simulations
+- the next likely source of improvement is better upstream regime-aware synthetic data rather than more hand-engineered Project 2 state growth
 
 ## Audit Expectations
 When analyzing or editing this repo:

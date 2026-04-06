@@ -10,6 +10,14 @@ def _drawdown(cum: np.ndarray) -> float:
     dd = cum - peak
     return float(np.min(dd))  # negative or 0
 
+def _window_stats(w: np.ndarray) -> np.ndarray:
+    vol = float(np.std(w))
+    drift = float(np.mean(w))
+    mom = float(np.sum(w))
+    cum = np.cumsum(w, dtype=np.float64)
+    dd = _drawdown(cum)
+    return np.array([vol, drift, mom, dd], dtype=np.float32)
+
 def make_state(returns: np.ndarray, t: int, lookback: int, position: int) -> np.ndarray:
     """
     returns: 1D array of per-step returns (float)
@@ -44,10 +52,21 @@ def make_state(returns: np.ndarray, t: int, lookback: int, position: int) -> np.
     slope = float(np.cov(x, cum)[0, 1] / (np.var(x) + 1e-12))
 
     regime = np.array([vol, drift, mom, dd, slope], dtype=np.float32)
-
-    # Normalize regime block with robust scaling
-    # (local scaling; later you can switch to train-set mean/std)
     regime = np.clip(regime, -5.0, 5.0)
+
+    # Multi-horizon summaries to support longer-horizon behavior.
+    h20 = returns[max(0, t - 20):t].astype(np.float32)
+    h60 = returns[max(0, t - 60):t].astype(np.float32)
+    h120 = returns[max(0, t - 120):t].astype(np.float32)
+
+    mh = []
+    for h in (h20, h60, h120):
+        if h.size == 0:
+            mh.append(np.zeros((4,), dtype=np.float32))
+        else:
+            mh.append(_window_stats(h))
+    multi_horizon = np.concatenate(mh, axis=0)
+    multi_horizon = np.clip(multi_horizon, -5.0, 5.0)
 
     # Position one-hot in env position order: [-1, 0, +1]
     pos_oh = np.zeros((3,), dtype=np.float32)
@@ -56,6 +75,6 @@ def make_state(returns: np.ndarray, t: int, lookback: int, position: int) -> np.
     if idx is not None:
         pos_oh[idx] = 1.0
 
-    # Final state = [lookback normalized returns] + [regime 5] + [pos one-hot 3]
-    state = np.concatenate([w_norm, regime, pos_oh], axis=0).astype(np.float32)
+    # Final state = [lookback normalized returns] + [regime 5] + [multi-horizon 12] + [pos one-hot 3]
+    state = np.concatenate([w_norm, regime, multi_horizon, pos_oh], axis=0).astype(np.float32)
     return state

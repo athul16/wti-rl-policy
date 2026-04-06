@@ -32,8 +32,8 @@ def main():
     cfg = EnvConfig(
         lookback=30,
         cost=0.0005,
-        risk_lambda=0.001,
-        episode_len=252,
+        risk_lambda=0.002,
+        episode_len=504,
         start_random=True,
     )
     n_actions = 3
@@ -58,7 +58,7 @@ def main():
     gamma = 0.99
     batch_size = 256
     warmup_steps = 10_000
-    train_steps_per_epoch = 2_000
+    train_steps_per_epoch = 4_000
     epochs = 50
 
     eps_start, eps_end = 1.0, 0.05

@@ -46,7 +46,7 @@ def main():
     print("Loaded held-out test episodes:", paths.shape)
     print(device_info())
 
-    cfg = EnvConfig(lookback=30, cost=0.0005, risk_lambda=0.001, episode_len=252, start_random=False)
+    cfg = EnvConfig(lookback=30, cost=0.0005, risk_lambda=0.002, episode_len=504, start_random=False)
 
     ckpt_path = Path("outputs/checkpoints/dqn_ep50.pt")
     if not ckpt_path.exists():

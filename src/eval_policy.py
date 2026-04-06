@@ -37,13 +37,13 @@ def run_baseline(env, action_id):
     return np.array(pnl, dtype=np.float64)
 
 def main():
-    # Use the same file as metrics_eval / your real episodes
-    ep_path = Path("data/sims/wti_real_episodes.npz")
+    # Use the held-out real test episodes, matching metrics_eval.py
+    ep_path = Path("data/sims/wti_real_test.npz")
     if not ep_path.exists():
-        raise FileNotFoundError("Missing data/sims/wti_real_episodes.npz (run: python3 -m src.make_real_episodes)")
+        raise FileNotFoundError("Missing data/sims/wti_real_test.npz (run: python3 -m src.split_real_episodes)")
 
     paths = load_sim_paths(ep_path)
-    print("Loaded episodes:", paths.shape)
+    print("Loaded held-out test episodes:", paths.shape)
     print(device_info())
 
     cfg = EnvConfig(lookback=30, cost=0.0005, risk_lambda=0.001, episode_len=252, start_random=False)
@@ -74,22 +74,27 @@ def main():
     env_flat = TradingEnv(rets, cfg)
     pnl_flat = run_baseline(env_flat, action_id=0)   # always flat (adjust if your mapping differs)
 
+    env_short = TradingEnv(rets, cfg)
+    pnl_short = run_baseline(env_short, action_id=2)  # always short
+
     eq_rl = np.cumsum(pnl_rl)
     eq_long = np.cumsum(pnl_long)
     eq_flat = np.cumsum(pnl_flat)
+    eq_short = np.cumsum(pnl_short)
 
-    out_dir = Path("outputs/figures")
+    out_dir = Path("outputs/eval")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     plt.figure()
-    plt.plot(eq_rl, label="RL policy")
-    plt.plot(eq_long, label="Always long")
-    plt.plot(eq_flat, label="Always flat")
-    plt.title("Equity curve on 1 episode")
+    plt.plot(eq_rl, label="RL Policy")
+    plt.plot(eq_flat, label="Always Flat")
+    plt.plot(eq_long, label="Always Long")
+    plt.plot(eq_short, label="Always Short")
+    plt.title("Held-Out Policy Comparison on 1 Episode")
     plt.xlabel("Step")
     plt.ylabel("Cumulative PnL")
     plt.legend()
-    out = out_dir / "equity_curve.png"
+    out = out_dir / "heldout_policy_comparison.png"
     plt.savefig(out, dpi=200, bbox_inches="tight")
     print("saved", out)
 

@@ -1,8 +1,11 @@
-import numpy as np
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import Tuple, Dict, Any
+import numpy as np
+
 from src.features import make_state
 
-ACTIONS = np.array([-1.0, 0.0, 1.0], dtype=np.float32)
 
 @dataclass
 class EnvConfig:
@@ -12,57 +15,90 @@ class EnvConfig:
     episode_len: int = 252
     start_random: bool = True
 
+
 class TradingEnv:
-    def __init__(self, returns_1d: np.ndarray, cfg: EnvConfig):
-        self.returns = np.asarray(returns_1d, dtype=np.float32)
+    """
+    Simple trading env on a fixed return path.
+
+    Actions:
+      0 = flat (pos=0)
+      1 = long (pos=+1)
+      2 = short (pos=-1)
+
+    Reward uses *next* return:
+      pnl = pos * r_{t+1}  - cost * |pos - prev_pos|
+      reward = pnl - risk_lambda * pos^2
+    """
+
+    def __init__(self, returns: np.ndarray, cfg: EnvConfig):
+        self.returns = np.asarray(returns, dtype=np.float32)
         self.cfg = cfg
-        self.T = len(self.returns)
-        min_len = cfg.lookback + cfg.episode_len + 2
-        if self.T < min_len:
-            raise ValueError(f"Return series too short. Need at least {min_len}, got {self.T}.")
-        self.done = False
+
+        self.T = int(self.returns.shape[0])
+        self.t: int = 0
+        self.t0: int = 0
+        self.done: bool = False
+        self.position: int = 0  # -1,0,+1
+
         self.reset()
 
-    def reset(self):
-        L = self.cfg.lookback
-        ep = self.cfg.episode_len
+    def reset(self) -> np.ndarray:
+        L = int(self.cfg.lookback)
 
-        max_start = self.T - (L + ep + 2)
-        if max_start < 0:
-            raise ValueError("Not enough data for episode with current lookback/episode_len.")
+        # pick a start index that allows lookback and episode_len and one-step-ahead reward
+        min_start = L
+        max_start = self.T - (self.cfg.episode_len + 1)
+        if max_start <= min_start:
+            raise ValueError(
+                f"Path too short for lookback={L} and episode_len={self.cfg.episode_len}. "
+                f"T={self.T}, need at least {L + self.cfg.episode_len + 1}."
+            )
 
         if self.cfg.start_random:
-            start_idx = np.random.randint(0, max_start + 1)
-            self.start = start_idx + L
+            self.t0 = int(np.random.randint(min_start, max_start))
         else:
-            self.start = L
+            self.t0 = min_start
 
-        self.t = self.start + L - 1
-        self.steps = 0
-        self.prev_w = 0.0
+        self.t = self.t0
         self.done = False
-        return make_state(self.returns, self.t, L)
+        self.position = 0
 
-    def step(self, action: int):
+        return make_state(self.returns, self.t, L, self.position)
+
+    def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
         if self.done:
-            raise RuntimeError("Call reset() before stepping after done=True.")
+            raise RuntimeError("step() called after episode done. Call reset().")
 
-        if self.t + 1 >= self.T:
-            self.done = True
-            obs = make_state(self.returns, self.t, self.cfg.lookback)
-            return obs, 0.0, True, {"w": float(ACTIONS[action]), "r_next": 0.0, "turnover": 0.0}
+        L = int(self.cfg.lookback)
 
-        w = float(ACTIONS[action])
+        if action == 0:
+            new_pos = 0
+        elif action == 1:
+            new_pos = 1
+        elif action == 2:
+            new_pos = -1
+        else:
+            raise ValueError(f"Invalid action {action}, expected 0/1/2.")
+
+        prev_pos = self.position
+        self.position = new_pos
+
+        # next return for reward
         r_next = float(self.returns[self.t + 1])
 
-        turnover = abs(w - self.prev_w)
-        reward = w * r_next - self.cfg.cost * turnover - self.cfg.risk_lambda * (w * w)
+        trade_cost = float(self.cfg.cost) * abs(self.position - prev_pos)
+        pnl = self.position * r_next - trade_cost
+        risk_pen = float(self.cfg.risk_lambda) * (self.position ** 2)
+        reward = pnl - risk_pen
 
-        self.prev_w = w
+        # advance time
         self.t += 1
-        self.steps += 1
-        self.done = self.steps >= self.cfg.episode_len
 
-        obs = make_state(self.returns, self.t, self.cfg.lookback)
-        info = {"w": w, "r_next": r_next, "turnover": turnover}
-        return obs, reward, self.done, info
+        # done when we’ve taken episode_len steps
+        if (self.t - self.t0) >= int(self.cfg.episode_len):
+            self.done = True
+
+        obs = make_state(self.returns, self.t, L, self.position)
+        info = {"pnl": pnl, "trade_cost": trade_cost, "risk_pen": risk_pen, "pos": self.position}
+
+        return obs, float(reward), self.done, info

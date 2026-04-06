@@ -3,107 +3,95 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from src.device import get_device
+from src.device import get_device, device_info
 from src.io_sims import load_sim_paths
-from src.env_trading import TradingEnv, EnvConfig, ACTIONS
+from src.env_trading import TradingEnv, EnvConfig
 from src.models import QNetwork
+from src.policy import select_action_eps_greedy
 
-def run_episode(qnet, returns_1d, cfg: EnvConfig, device, eps: float = 0.0):
-    env = TradingEnv(returns_1d, cfg)
+def run_episode(env, q=None, device=None, greedy=True):
     obs = env.reset()
     done = False
-
-    ws = []
-    rs = []
-    rewards = []
+    pnl = []
+    actions = []
 
     while not done:
-        if np.random.rand() < eps:
-            a = int(np.random.randint(0, len(ACTIONS)))
+        if q is None:
+            # baseline expects env to have .position updated by env.step
+            a = 1  # placeholder; caller sets by passing different env/logic
         else:
-            with torch.no_grad():
-                x = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-                q = qnet(x)
-                a = int(torch.argmax(q, dim=-1).item())
+            eps = 0.0 if greedy else 0.05
+            a = select_action_eps_greedy(q, obs, eps, device, n_actions=3)
+        obs, r, done, _ = env.step(a)
+        pnl.append(float(r))
+        actions.append(int(a))
+    return np.array(pnl, dtype=np.float64), np.array(actions, dtype=np.int64)
 
-        obs, rew, done, info = env.step(a)
-        ws.append(info["w"])
-        rs.append(info["r_next"])
-        rewards.append(rew)
-
-    ws = np.array(ws, dtype=np.float32)
-    rs = np.array(rs, dtype=np.float32)
-    pnl = ws * rs
-    equity = np.cumsum(pnl)
-    return {
-        "equity": equity,
-        "pnl": pnl,
-        "ws": ws,
-        "rs": rs,
-        "rewards": np.array(rewards, dtype=np.float32),
-    }
+def run_baseline(env, action_id):
+    obs = env.reset()
+    done = False
+    pnl = []
+    while not done:
+        obs, r, done, _ = env.step(action_id)
+        pnl.append(float(r))
+    return np.array(pnl, dtype=np.float64)
 
 def main():
-    device = get_device()
+    # Use the same file as metrics_eval / your real episodes
+    ep_path = Path("data/sims/wti_real_episodes.npz")
+    if not ep_path.exists():
+        raise FileNotFoundError("Missing data/sims/wti_real_episodes.npz (run: python3 -m src.make_real_episodes)")
+
+    paths = load_sim_paths(ep_path)
+    print("Loaded episodes:", paths.shape)
+    print(device_info())
+
+    cfg = EnvConfig(lookback=30, cost=0.0005, risk_lambda=0.001, episode_len=252, start_random=False)
 
     ckpt_path = Path("outputs/checkpoints/dqn_ep50.pt")
     if not ckpt_path.exists():
-        ckpts = sorted(Path("outputs/checkpoints").glob("dqn_ep*.pt"))
-        if not ckpts:
-            raise FileNotFoundError("No checkpoints found in outputs/checkpoints/")
-        ckpt_path = ckpts[-1]
+        raise FileNotFoundError("Missing checkpoint outputs/checkpoints/dqn_ep50.pt")
 
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    obs_dim = int(ckpt["obs_dim"])
-    n_actions = int(ckpt["n_actions"])
+    obj = torch.load(ckpt_path, map_location="cpu")
+    obs_dim = int(obj.get("obs_dim", cfg.lookback + 2))
+    n_actions = int(obj.get("n_actions", 3))
 
-    qnet = QNetwork(obs_dim=obs_dim, hidden=128, n_actions=n_actions).to(device)
-    qnet.load_state_dict(ckpt["q_state_dict"])
-    qnet.eval()
+    device = get_device()
+    q = QNetwork(obs_dim=obs_dim, hidden=128, n_actions=n_actions).to(device)
+    q.load_state_dict(obj["q_state_dict"])
+    q.eval()
 
-    cfg = EnvConfig(**ckpt["cfg"])
+    # Pick a deterministic episode index so plot + metrics match
+    idx = 0
+    rets = paths[idx]
 
-    sim_path = Path("data/sims/wti_simulated_paths.npz")
-    paths = load_sim_paths(sim_path)
-    N = paths.shape[0]
+    env_rl = TradingEnv(rets, cfg)
+    pnl_rl, acts = run_episode(env_rl, q=q, device=device, greedy=True)
 
-    idx = np.random.randint(0, N)
-    returns_1d = paths[idx]
+    env_long = TradingEnv(rets, cfg)
+    pnl_long = run_baseline(env_long, action_id=1)   # always long
 
-    out_rl = run_episode(qnet, returns_1d, cfg, device=device, eps=0.0)
+    env_flat = TradingEnv(rets, cfg)
+    pnl_flat = run_baseline(env_flat, action_id=0)   # always flat (adjust if your mapping differs)
 
-    env2 = TradingEnv(returns_1d, cfg)
-    obs = env2.reset()
-    done = False
-    rs = []
-    while not done:
-        obs, rew, done, info = env2.step(2)
-        rs.append(info["r_next"])
-    rs = np.array(rs, dtype=np.float32)
-    out_long = np.cumsum(rs)
+    eq_rl = np.cumsum(pnl_rl)
+    eq_long = np.cumsum(pnl_long)
+    eq_flat = np.cumsum(pnl_flat)
 
-    env3 = TradingEnv(returns_1d, cfg)
-    obs = env3.reset()
-    done = False
-    rs2 = []
-    while not done:
-        obs, rew, done, info = env3.step(1)
-        rs2.append(info["r_next"])
-    rs2 = np.array(rs2, dtype=np.float32)
-    out_flat = np.cumsum(0.0 * rs2)
+    out_dir = Path("outputs/figures")
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    fig = plt.figure()
-    plt.plot(out_rl["equity"], label="RL policy")
-    plt.plot(out_long, label="Always long")
-    plt.plot(out_flat, label="Always flat")
-    plt.title("Equity curve on 1 simulated WTI path")
+    plt.figure()
+    plt.plot(eq_rl, label="RL policy")
+    plt.plot(eq_long, label="Always long")
+    plt.plot(eq_flat, label="Always flat")
+    plt.title("Equity curve on 1 episode")
     plt.xlabel("Step")
-    plt.ylabel("Cumulative PnL (log-return units)")
+    plt.ylabel("Cumulative PnL")
     plt.legend()
-    Path("outputs/figures").mkdir(parents=True, exist_ok=True)
-    out_file = Path("outputs/figures/equity_curve.png")
-    plt.savefig(out_file, dpi=200, bbox_inches="tight")
-    print("saved", out_file)
+    out = out_dir / "equity_curve.png"
+    plt.savefig(out, dpi=200, bbox_inches="tight")
+    print("saved", out)
 
 if __name__ == "__main__":
     main()
